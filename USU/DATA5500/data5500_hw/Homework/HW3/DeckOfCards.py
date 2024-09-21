@@ -1,16 +1,20 @@
 import random
 
-
+# creating blueprint for each individual card
 class Card():
     def __init__(self, suit, face, value):
         self.suit = suit
         self.face = face
         self.val = value
-        
+
+
+    # how cards will be read
     def __str__(self):
         return self.face + " of " + self.suit + ", value: " + str(self.val)
+        # ex: 2 of Clubs, value: 2
 
 
+# combining cards to make a deck
 class DeckOfCards():
     def __init__(self):
         self.deck = []
@@ -24,7 +28,8 @@ class DeckOfCards():
             for i in range(len(self.faces)):
                 self.deck.append(Card(suit, self.faces[i], self.values[i]))
                 
-                
+
+    # creating card shuffling        
     def shuffle_deck(self):
         random.shuffle(self.deck)
         self.play_idx = 0
