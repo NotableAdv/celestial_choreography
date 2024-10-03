@@ -32,4 +32,4 @@ print("Total:", array_sum(integers_np))
 # Analyze the time complexity of your solution using Big O notation, 
 # especially what is the Big O notation of the code you wrote.
 
-# The Big 0 notation for this code is O(n). The n is the number of elements in the array (so 10). 
+# The Big 0 notation for this code is O(n) because of the for loop in my function and appending my integer list. The n is the number of elements in the array (so 10). 

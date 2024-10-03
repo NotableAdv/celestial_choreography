@@ -37,4 +37,4 @@ print("Second largest integer:", array_max(integers_np))
 # Analyze the time complexity of your solution using Big O notation, 
 # especially what is the Big O notation of the code you wrote.
 
-# The Big 0 notation for this code is O(n^2). The n is the number of elements in the array (so 10).
+# The Big 0 notation for this code is O(n^2) because of the 2 for loops in the function. The n is the number of elements in the array (so 10).
