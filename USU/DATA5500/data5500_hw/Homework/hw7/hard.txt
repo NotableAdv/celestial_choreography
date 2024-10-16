@@ -1,0 +1,14 @@
+Explain the process of deleting a node from a binary search tree in Python. 
+Discuss how you would handle different cases, such as deleting a node with one, or two children. 
+Additionally, explain any potential challenges or edge cases that may arise during the deletion process and how you would address them. 
+
+
+The first step in deleting a node from a binary search tree is to find the node. You would use a function to compare the current node's value 
+to the key you want to delete. If the key is smaller, the search continues in the left subtree. If it's larger, it moves to the right. This 
+repeats until the key is found or the search reaches the end of the tree, which means the key isn't in the tree and there is nothing to delete. 
+If the tree is empty, the function would run but not do anything.
+
+Once the key is found, the second step, deleting the key, depends on the number of children the node has. If it has no children, the key can 
+just be removed. If the node has one child, the key node is replaced by the child. However, if the key has two children, you will need to replace 
+the key node with either the smallest node in the right subtree or the largest node in the left subtree (so the next right or left). This will 
+keep the logic and structure of the tree intact.
