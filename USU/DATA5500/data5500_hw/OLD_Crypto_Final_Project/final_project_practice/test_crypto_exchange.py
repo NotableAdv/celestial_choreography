@@ -1,5 +1,8 @@
-# This is the url that we will need to call in order to get the exchange rates of each crypto currency
-# url = 'https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies={vs_currencies}'
+# This is the url that I used  to get the exchange rates of each crypto currency
+# "https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies={vs_currencies}"
+
+# This is the base url that I used to place paper orders
+# "https://paper-api.alpaca.markets"
 
 # importing libraries
 import os
@@ -9,8 +12,16 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from itertools import permutations
 
+# libraries needed for paper trading with Alpaca
+import alpaca_trade_api as tradeapi
+from alpaca_trade_api.rest import REST
+
+# my api keys with Alpaca
+api_key = 'PKAZDKWPN9XTS0TPPXIF'
+api_secret = 'dtGGSlvXtB08mKCRdzAQol77cvHoOlvjyxEzg0DO'
+
 # function to calculate the weight of a path by multiplying the weights together
-def calculate_path_weight(g, path):
+def calculate_path_weight(g, path   ):
     path_weight = 1
     for i in range(len(path) - 1):
         path_weight *= g[path[i]][path[i+1]]['weight']
@@ -18,6 +29,7 @@ def calculate_path_weight(g, path):
 
 # function to find all the paths, print them, and find the paths with the smallest and largest factors
 def find_paths(g):
+
     # setting up variables
     smallest_path = []
     largest_path = []
@@ -45,11 +57,12 @@ def find_paths(g):
 
                         # multiply the weights to get the arbitrage factor
                         factor = forward_weight * reverse_weight
-
                         # print all the paths and their factors
                         print(forward_path)
                         print(reverse_path)
                         print(factor)
+
+                        
 
                         # if the factor is the current smallest, make it the smallest and save it's path
                         if factor < smallest_factor:
@@ -62,12 +75,36 @@ def find_paths(g):
                             largest_path = (forward_path, reverse_path)
 
     # return the result information
-    return smallest_factor, largest_factor, smallest_path, largest_path                
+    return smallest_factor, largest_factor, smallest_path, largest_path   
+                                    
 
+def alpaca_get_account():
+    r = requests.get(account_url, headers = header)
+
+    return json.loads(r.content)
+
+def create_order(symbol, qty, side, type, time_in_force):
+    data = {
+        "class": 'crypto',
+        "symbol": symbol,
+        "qty": qty,
+        "side": side,
+        "type": type,
+        "time_in_force": time_in_force
+    }
+    r = requests.post(orders_url,json=data, headers = header)
+
+    return json.loads(r.content)
 
 # file the cyrpto currencies are listed in
 curr_dir = os.path.dirname(__file__)
 file_path = os.path.join(curr_dir, "crypto_ids.txt")
+
+# urls needs for 
+base_url = "https://paper-api.alpaca.markets"
+account_url = "{}/v2/account". format(base_url)
+orders_url = "{}/v2/orders". format(base_url)
+header = {'APCA-API-KEY-ID': api_key, 'APCA-API-SECRET-KEY': api_secret}
 
 # read the currencies from file
 currencies = []
@@ -124,9 +161,11 @@ try:
     print('Paths:', largest_path)
 
 # in case there is an error for finding paths    
-except:
+except Exception as e:
     print(f"Error during path finding: {e}")
 
+#forward_path, reverse_path, factor  = find_paths(g)
+#print(forward_path, reverse_path, factor)
 
 # printing a graph of the currency exchange rates
 curr_dir = os.path.dirname(__file__) # get the current directory of this file

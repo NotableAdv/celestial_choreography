@@ -1,0 +1,13 @@
+currency_from,currency_to,exchange_rate
+bch,ltc,4.775626
+bch,eth,0.14261157
+bch,btc,0.00539738
+ltc,bch,0.20936323
+ltc,eth,0.02986741
+ltc,btc,0.00113038
+eth,bch,7.009641
+eth,ltc,33.4864
+eth,btc,0.03784608
+btc,bch,185.185
+btc,ltc,884.663
+btc,eth,26.418159

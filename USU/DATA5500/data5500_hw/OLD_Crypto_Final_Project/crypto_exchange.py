@@ -1,5 +1,3 @@
-# This is the url that we will need to call in order to get the exchange rates of each crypto currency
-# url = 'https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies={vs_currencies}'
 
 # importing libraries
 import os
@@ -8,6 +6,11 @@ import json
 import networkx as nx
 import matplotlib.pyplot as plt
 from itertools import permutations
+import alpaca_trade_api as tradeapi
+import csv
+from datetime import datetime
+
+qty = 1
 
 # function to calculate the weight of a path by multiplying the weights together
 def calculate_path_weight(g, path):
@@ -33,8 +36,6 @@ def find_paths(g):
             # if the nodes have paths that can go both ways
             if forward_paths and reverse_paths:
 
-                print(f'\033[1mPaths from {start} to {end}----------------------------------------------\033[0m')
-
                 # calculate the weight of forward paths
                 for forward_path in forward_paths:
                     forward_weight = calculate_path_weight(g,forward_path)
@@ -45,11 +46,6 @@ def find_paths(g):
 
                         # multiply the weights to get the arbitrage factor
                         factor = forward_weight * reverse_weight
-
-                        # print all the paths and their factors
-                        print(forward_path)
-                        print(reverse_path)
-                        print(factor)
 
                         # if the factor is the current smallest, make it the smallest and save it's path
                         if factor < smallest_factor:
@@ -64,10 +60,77 @@ def find_paths(g):
     # return the result information
     return smallest_factor, largest_factor, smallest_path, largest_path                
 
+# Function to execute a trade order
+def execute_order(symbol, qty, side, order_type='market', time_in_force='gtc'):
+    try:
+        # Place an order
+        order = api.submit_order(
+            symbol= symbol.upper(),
+            qty=qty,
+            side=side,
+            type=order_type,
+            time_in_force=time_in_force
+        )
+        print(f"Order submitted: {side} {qty} {symbol}")
+        return order
+    except Exception as e:
+        print(f"Error placing order: {e}")
+
+def arbitrage_path_finder(largest_path):
+    path1, path2 = largest_path
+
+    print(f"Attempting arbitrage between {path1[0]} and {path2[0]}")
+
+    # Append elements from list2 starting from the second element
+    arbitrage_path = path1 + path2[1:]
+
+    return arbitrage_path
+
+def execute_arbitrage_test(arbitrage_path):
+    
+    for currency in arbitrage_path:
+        symbol = currency
+        print(f"Placing buy order for {symbol} (Buy)")
+        execute_order(symbol, qty, 'buy')
+
+        print(f"Placing sell order for {symbol} (Sell)")
+        execute_order(symbol, qty, 'sell')     
+
+
+# Arbitrage strategy to buy/sell from the two paths
+def execute_arbitrage(largest_path):
+    p1, p2 = largest_path
+
+    # Iterate through path_1 and path_2 to execute individual orders
+    qty = 1
+
+    # Loop through each symbol in path_1
+    for p in p1:
+        symbol_1 = f'{p}USD'  # Ensure the symbol is like 'bchUSD'
+        print(f"Placing buy order for {symbol_1} (Buy)")
+        execute_order(symbol_1, qty, 'buy')
+
+    # Loop through each symbol in path_2
+    for p in p2:
+        symbol_2 = f'{p}USD'  # Ensure the symbol is like 'ethUSD'
+        print(f"Placing sell order for {symbol_2} (Sell)")
+        execute_order(symbol_2, qty, 'sell')
 
 # file the cyrpto currencies are listed in
 curr_dir = os.path.dirname(__file__)
 file_path = os.path.join(curr_dir, "crypto_ids.txt")
+data_folder = os.path.join(curr_dir, "data")
+
+timestamp = datetime.now().strftime("%Y.%m.%d.%H.%M")
+
+# Create the filename
+filename = os.path.join(data_folder, f"currency_pair_{timestamp}.csv")
+
+ALPACA_API_KEY = 'PK0UIH8MUPY38EIYNEF5'
+ALPACA_API_SECRET = 'yaqdUMPcwP7tzFI03hCi3axRUdX341peYlmVcvqj'
+API_URL = "https://paper-api.alpaca.markets"
+
+api = tradeapi.REST(ALPACA_API_KEY, ALPACA_API_SECRET, API_URL, api_version='v2')
 
 # read the currencies from file
 currencies = []
@@ -102,13 +165,21 @@ for batch in currency_batches:
         # make the API request
         req = requests.get(url)
         req.raise_for_status()  # Raise error for HTTP issues
-        data = req.json()
+        api_data = req.json()
         
         # add the node info from the API
-        for c1, c2 in permutations(currencies, 2):
-            if c1 != c2 and c2 in data[currency_map[c1]]:
-                rate = data[currency_map[c1]][c2]
-                g.add_edge(c1, c2, weight=rate)
+        with open(filename, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(["currency_from", "currency_to", "exchange_rate"])  # Header
+
+            # Add data while building the graph
+            for c1, c2 in permutations(currencies, 2):
+                if c1 != c2 and c2 in api_data[currency_map[c1]]:
+                    rate = api_data[currency_map[c1]][c2]
+                    g.add_edge(c1, c2, weight=rate)
+
+                    # Write to CSV file
+                    writer.writerow([c1, c2, rate])
 
     # if the data won't pull from the API
     except Exception as e:
@@ -122,6 +193,8 @@ try:
     print('Paths:', smallest_path)
     print('Largest Path Weight Factor:', largest_factor) # best trade to make right then
     print('Paths:', largest_path)
+
+    execute_arbitrage(largest_path)
 
 # in case there is an error for finding paths    
 except:

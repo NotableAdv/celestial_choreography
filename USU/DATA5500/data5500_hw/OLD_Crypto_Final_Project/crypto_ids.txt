@@ -1,0 +1,4 @@
+bitcoin-cash,bch
+litecoin,ltc
+ethereum,eth
+bitcoin,btc
