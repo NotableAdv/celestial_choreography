@@ -15,6 +15,16 @@ rpo_plan = pd.read_csv(rpo_plan_path)
 rpo_plan["secondsSinceStart"] = pd.to_numeric(rpo_plan["secondsSinceStart"], errors="coerce")
 rpo_plan["relativeRange"] = pd.to_numeric(rpo_plan["relativeRange"], errors="coerce")
 
+# Define thresholds for "bad vision" hot zones
+MOON_ANGLE_THRESHOLD = 12 
+EARTH_ANGLE_THRESHOLD = 10
+SUN_ANGLE_THRESHOLD = 40
+
+# Ensure hotzone columns exist
+rpo_plan["HotZone_Moon"] = rpo_plan["sensorAngleToMoon"] < MOON_ANGLE_THRESHOLD
+rpo_plan["HotZone_Earth"] = rpo_plan["sensorAngleToEarth"] < EARTH_ANGLE_THRESHOLD
+rpo_plan["HotZone_Sun"] = rpo_plan["sensorAngleToSun"] < SUN_ANGLE_THRESHOLD
+
 # Extract RPO trajectory
 rpo_time = rpo_plan["secondsSinceStart"]
 rpo_x, rpo_y, rpo_z = (
@@ -23,6 +33,8 @@ rpo_x, rpo_y, rpo_z = (
     rpo_plan["positionDepRelToChiefLvlhZ"]
 )
 rpo_range = rpo_plan["relativeRange"]
+rpo_velocity = pd.to_numeric(rpo_plan["relativeVelocity"], errors="coerce")
+
 
 # **Chief (RSO) static position**
 chief_x, chief_y, chief_z = [0], [0], [0]  # Adjust if there's a specific position
@@ -67,19 +79,41 @@ app.layout = html.Div([
         clearable=False
     ),
     
+    html.Div([
+    html.Label("Select Vision Obstruction Highlight"),
+    dcc.Dropdown(
+    id="hotzone-selector",
+    options=[
+        {"label": "Show None", "value": "none"},  # New option
+        {"label": "Show All", "value": "all"},
+        {"label": "Highlight Bad Moon Angle", "value": "HotZone_Moon"},
+        {"label": "Highlight Bad Earth Angle", "value": "HotZone_Earth"},
+        {"label": "Highlight Bad Sun Angle", "value": "HotZone_Sun"},
+    ],
+    value="none",  # Default to "Show None"
+    clearable=False
+),
+]),
+
     # 3D Flight Path Visualization
     dcc.Graph(id="flight-path-plot"),
     
     # 2D Relative Range Over Time Visualization
     dcc.Graph(id="relative-range-plot"),
+
+    # 2D Relative Velocity Over Time Visualization
+    dcc.Graph(id="relative-velocity-plot"),
+
 ])
 
 @app.callback(
     [Output("flight-path-plot", "figure"),
-     Output("relative-range-plot", "figure")],
-    Input("maneuver-selector", "value")
+     Output("relative-range-plot", "figure"),
+     Output("relative-velocity-plot", "figure")],  # Added velocity plot
+    [Input("maneuver-selector", "value"),
+     Input("hotzone-selector", "value")]
 )
-def update_plots(selected_maneuver):
+def update_plots(selected_maneuver, selected_hotzone):
     fig_3d = go.Figure()
     fig_2d = go.Figure()
 
@@ -222,7 +256,7 @@ def update_plots(selected_maneuver):
     ))
 
     # Format 3D plot
-    fig_3d.update_layout(scene=dict(xaxis_title="Relative X (km)", yaxis_title="Relative Y (km)", zaxis_title="Relative Z (km)"))
+    fig_3d.update_layout(scene=dict(xaxis_title="Relative X", yaxis_title="Relative Y", zaxis_title="Relative Z"))
 
     # Dynamically determine y-axis range based on selected maneuver
     if selected_maneuver == "main":
@@ -242,9 +276,50 @@ def update_plots(selected_maneuver):
         xaxis=dict(range=[x_min, x_max], rangeslider=dict(visible=True)),  # Auto-zoom x-axis to relevant time range
     )
 
+    # Overlay vision highlights as red markers
+    if selected_hotzone == "all":
+        # Show all vision obstructions
+        hotzone_data = rpo_plan[(rpo_plan["HotZone_Moon"]) | (rpo_plan["HotZone_Earth"]) | (rpo_plan["HotZone_Sun"])]
+        fig_3d.add_trace(go.Scatter3d(
+            x=hotzone_data["positionDepRelToChiefLvlhX"],
+            y=hotzone_data["positionDepRelToChiefLvlhY"],
+            z=hotzone_data["positionDepRelToChiefLvlhZ"],
+            mode="markers",
+            marker=dict(color="red", size=5),
+            name="All Vision Obstructions"
+        ))
+    elif selected_hotzone != "none":  # Show individual obstructions
+        hotzone_data = rpo_plan[rpo_plan[selected_hotzone]]
+        fig_3d.add_trace(go.Scatter3d(
+            x=hotzone_data["positionDepRelToChiefLvlhX"],
+            y=hotzone_data["positionDepRelToChiefLvlhY"],
+            z=hotzone_data["positionDepRelToChiefLvlhZ"],
+            mode="markers",
+            marker=dict(color="red", size=5),
+            name="Vision Obstruction"
+        ))
 
 
-    return fig_3d, fig_2d
+    fig_velocity = go.Figure()
+
+    # 2D: Relative Velocity Over Time
+    fig_velocity.add_trace(go.Scatter(
+        x=rpo_time, y=rpo_velocity,
+        mode="lines",
+        name="Relative Velocity",
+        line=dict(color="purple", width=2)
+    ))
+
+    fig_velocity.update_layout(
+        xaxis_title="Time (secondsSinceStart)",
+        yaxis_title="Relative Velocity (m/s)",
+        margin=dict(l=0, r=0, b=40, t=40),
+        legend=dict(x=0, y=1),
+        xaxis=dict(range=[rpo_time.min(), rpo_time.max()], rangeslider=dict(visible=True))
+)
+
+
+    return fig_3d, fig_2d, fig_velocity
 
 if __name__ == '__main__':
     app.run_server(debug=True)
