@@ -55,6 +55,14 @@ app.layout = html.Div([
 def update_plot(selected_maneuver):
     fig = go.Figure()
 
+    # **Add the Chief as a static reference point (small black sphere at (0,0,0))**
+    fig.add_trace(go.Scatter3d(
+        x=[0], y=[0], z=[0],
+        mode="markers",
+        marker=dict(color="black", size=4, symbol="circle"),
+        name="Chief (Reference)"
+    ))
+
     if selected_maneuver == "main":
         # Plot full RPO plan
         fig.add_trace(go.Scatter3d(
