@@ -1,0 +1,8 @@
+3 Pillars of Object-Oriented Programming
+   1) Inheritance - parent class and a child class (anything you can do I can do better)
+   2) Encapsulation - which pieces of data are public vs private
+   3) Polymorphism
+
+__init__ is the constructor, dunder also for double quotes
+
+from DeckOfCards import *
