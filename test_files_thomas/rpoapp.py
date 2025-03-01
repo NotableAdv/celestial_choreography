@@ -2,6 +2,7 @@ import os
 import pandas as pd
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output
+import re
 
 # Define the directory where CSV files are stored
 DATA_DIR = "Data"
@@ -21,14 +22,24 @@ rpo_x, rpo_y, rpo_z = (
     rpo_plan["positionDepRelToChiefLvlhZ"]
 )
 
-# Find all maneuver branch files
-branch_files = [f for f in os.listdir(DATA_DIR) if f.startswith("ManeuverBranchId") and f.endswith(".csv")]
-branch_files.sort()  # Sort for consistency
+# Extract Chief (RSO) position (assuming it remains static at (0,0,0))
+chief_x, chief_y, chief_z = [0], [0], [0]  # Adjust if there's a specific position
 
-# Create dropdown options dynamically
+# Function to extract maneuver number for natural sorting
+def extract_number(filename):
+    match = re.search(r"(\d+)", filename)
+    return int(match.group(0)) if match else float("inf")
+
+# Find and sort all maneuver branch files numerically
+branch_files = sorted(
+    [f for f in os.listdir(DATA_DIR) if f.startswith("ManeuverBranchId") and f.endswith(".csv")],
+    key=extract_number
+)
+
+# Create dropdown options dynamically with corrected order
 dropdown_options = [{"label": "Full RPO Plan (No Failure)", "value": "main"}]
 dropdown_options += [
-    {"label": f"Miss Maneuver {f.split('ManeuverBranchId')[1].split('.')[0]}", "value": f} for f in branch_files
+    {"label": f"Miss Maneuver {extract_number(f)}", "value": f} for f in branch_files
 ]
 
 # Initialize Dash App
@@ -54,14 +65,6 @@ app.layout = html.Div([
 )
 def update_plot(selected_maneuver):
     fig = go.Figure()
-
-    # **Add the Chief as a static reference point (small black sphere at (0,0,0))**
-    fig.add_trace(go.Scatter3d(
-        x=[0], y=[0], z=[0],
-        mode="markers",
-        marker=dict(color="black", size=4, symbol="circle"),
-        name="Chief (Reference)"
-    ))
 
     if selected_maneuver == "main":
         # Plot full RPO plan
@@ -136,7 +139,7 @@ def update_plot(selected_maneuver):
         ))
 
         # Plot the expected RPO continuation in **dashed green**
-        if not expected_rpo_x.empty:
+        if len(expected_rpo_x) > 0:
             fig.add_trace(go.Scatter3d(
                 x=expected_rpo_x, y=expected_rpo_y, z=expected_rpo_z,
                 mode="lines",
@@ -148,9 +151,17 @@ def update_plot(selected_maneuver):
         fig.add_trace(go.Scatter3d(
             x=[break_x], y=[break_y], z=[break_z],
             mode="markers",
-            marker=dict(color="green", size=6, symbol="diamond"),
+            marker=dict(color="green", size=4, symbol="diamond"),
             name="Break-off Point"
         ))
+
+    # **Add static Chief (RSO) at the center**
+    fig.add_trace(go.Scatter3d(
+        x=chief_x, y=chief_y, z=chief_z,
+        mode="markers",
+        marker=dict(color="black", size=6, symbol="circle"),
+        name="Chief (RSO)"
+    ))
 
     fig.update_layout(
         scene=dict(
