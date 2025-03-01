@@ -100,17 +100,6 @@ def update_plots(selected_maneuver):
             line=dict(color="blue", width=2)
         ))
 
-        # **Find & plot markers for close approaches (≤ 100m)**
-        close_approach_mask = rpo_range <= 100  # Boolean mask where relative range is ≤ 100m
-        if close_approach_mask.any():
-            fig_2d.add_trace(go.Scatter(
-                x=rpo_time[close_approach_mask], y=rpo_range[close_approach_mask],
-                mode="markers",
-                marker=dict(color="orange", size=8, symbol="circle"),
-                name="Close Approach (≤100m)"
-            ))
-
-
     else:
         # Load maneuver branch
         branch_path = os.path.join(DATA_DIR, selected_maneuver)
@@ -190,18 +179,6 @@ def update_plots(selected_maneuver):
             name=f"Range after {selected_maneuver}",
             line=dict(color="red", width=2)
         ))
-
-        # **Find & plot markers for close approaches (≤ 100m) in maneuver branch**
-        branch_close_approach_mask = maneuver_branch["relativeRange"] <= 100  # Boolean mask
-        if branch_close_approach_mask.any():
-            fig_2d.add_trace(go.Scatter(
-                x=maneuver_branch["secondsSinceStart"][branch_close_approach_mask],
-                y=maneuver_branch["relativeRange"][branch_close_approach_mask],
-                mode="markers",
-                marker=dict(color="orange", size=8, symbol="circle"),
-                name="Close Approach (≤100m) - Maneuver"
-            ))
-
 
         # Expected RPO continuation (dashed green)
         expected_rpo_indices = rpo_time[(rpo_time >= break_off_time) & (rpo_time <= end_maneuver_time)].index
