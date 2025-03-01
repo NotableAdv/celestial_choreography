@@ -16,6 +16,17 @@ rpo_plan = pd.read_csv(rpo_plan_path)
 maneuver_plan_path = os.path.join(DATA_DIR, "ManeuverPlan.csv")
 maneuver_plan = pd.read_csv(maneuver_plan_path)
 
+# Stored Data CSVs
+# Ensure numeric columns
+rpo_plan["storedData"] = pd.to_numeric(rpo_plan["storedData"], errors="coerce")
+
+# Remove NaN values
+rpo_plan = rpo_plan.dropna(subset=["secondsSinceStart", "storedData"])
+
+# Sort by time for correct plotting
+rpo_plan = rpo_plan.sort_values(by="secondsSinceStart")
+
+
 # Ensure numeric columns
 maneuver_plan["secondsSinceStart"] = pd.to_numeric(maneuver_plan["secondsSinceStart"], errors="coerce")
 maneuver_plan["dVMagnitude"] = pd.to_numeric(maneuver_plan["dVMagnitude"], errors="coerce")
@@ -97,7 +108,7 @@ app.layout = html.Div([
 
     # Navigation Links
     html.Div([
-        dcc.Link("Main Page | ", href="/"),
+        dcc.Link("Mission Overview | ", href="/"),
         dcc.Link("Additional Graphs", href="/graphs"),
     ], style={"padding": "10px", "fontSize": "20px"}),
 
@@ -110,15 +121,18 @@ def main_page():
         html.H1("RPO Flight Path & Relative Range Analysis"),
 
         # Dropdown for maneuver selection
-        dcc.Dropdown(
-            id="maneuver-selector",
-            options=dropdown_options,
-            value="main",
-            clearable=False
-        ),
+        html.Div([
+            html.Label("Select Maneuver Branch to Observe Failure Path"),
+            dcc.Dropdown(
+                id="maneuver-selector",
+                options=dropdown_options,
+                value="main",
+                clearable=False
+            ),
+        ]),
 
         html.Div([
-            html.Label("Select Vision Obstruction Highlight"),
+            html.Label("Select Vision Obstruction(s) to Highlight"),
             dcc.Dropdown(
                 id="hotzone-selector",
                 options=[
@@ -147,9 +161,19 @@ def graphs_page():
     return html.Div([
         html.H1("Additional Graphs"),
 
+        html.P(
+            "This dataset was partially explored, but we did not have enough time to fully integrate it into our analysis. "
+            "Further investigation could help establish stronger connections with the rest of the project..",
+            style={"font-size": "16px", "margin-bottom": "20px"}
+        ),
+
         # Delta-V Over Time Graph
         dcc.Graph(id="delta-v-plot"),
+
+        # Stored Data Levels Over Time Graph
+        dcc.Graph(id="stored-data-plot"),
     ])
+
 
 
 
@@ -303,7 +327,7 @@ def update_plots(selected_maneuver, selected_hotzone):
     ))
 
     # Format 3D plot
-    fig_3d.update_layout(scene=dict(xaxis_title="Relative X", yaxis_title="Relative Y", zaxis_title="Relative Z"))
+    fig_3d.update_layout(title="RPO Potential Maneuver Failures & Vision Obstructions",scene=dict(xaxis_title="Relative X", yaxis_title="Relative Y", zaxis_title="Relative Z"))
 
     # Dynamically determine y-axis range based on selected maneuver
     if selected_maneuver == "main":
@@ -315,6 +339,7 @@ def update_plots(selected_maneuver, selected_hotzone):
 
     # Format 2D plot with dynamic y-axis scaling and zoomed x-axis
     fig_2d.update_layout(
+        title="Deputy Distance Relative to Chief",
         xaxis_title="Time (secondsSinceStart)",
         yaxis_title="Relative Range (m)",
         margin=dict(l=0, r=0, b=40, t=40),
@@ -323,7 +348,7 @@ def update_plots(selected_maneuver, selected_hotzone):
         xaxis=dict(range=[x_min, x_max], rangeslider=dict(visible=True)),  # Auto-zoom x-axis to relevant time range
     )
 
-    # Overlay vision highlights as red markers
+    # Overlay vision highlights
     if selected_hotzone == "all":
         # Show all vision obstructions
         hotzone_data = rpo_plan[(rpo_plan["HotZone_Moon"]) | (rpo_plan["HotZone_Earth"]) | (rpo_plan["HotZone_Sun"])]
@@ -332,7 +357,7 @@ def update_plots(selected_maneuver, selected_hotzone):
             y=hotzone_data["positionDepRelToChiefLvlhY"],
             z=hotzone_data["positionDepRelToChiefLvlhZ"],
             mode="markers",
-            marker=dict(color="red", size=5),
+            marker=dict(color="magenta", size=5),
             name="All Vision Obstructions"
         ))
     elif selected_hotzone != "none":  # Show individual obstructions
@@ -342,7 +367,7 @@ def update_plots(selected_maneuver, selected_hotzone):
             y=hotzone_data["positionDepRelToChiefLvlhY"],
             z=hotzone_data["positionDepRelToChiefLvlhZ"],
             mode="markers",
-            marker=dict(color="red", size=5),
+            marker=dict(color="magenta", size=5),
             name="Vision Obstruction"
         ))
 
@@ -358,6 +383,7 @@ def update_plots(selected_maneuver, selected_hotzone):
     ))
 
     fig_velocity.update_layout(
+        title="Deputy Velocity Relative to Chief on Approach",
         xaxis_title="Time (secondsSinceStart)",
         yaxis_title="Relative Velocity (m/s)",
         margin=dict(l=0, r=0, b=40, t=40),
@@ -412,12 +438,39 @@ def update_delta_v_plot(_):
         xaxis_title="Time (UTC)",
         yaxis_title="ΔV (m/s)",
         legend=dict(x=0, y=1),
-        xaxis=dict(rangeslider=dict(visible=True)),
         height=600,  # **Increase height for better separation**
         template="plotly_white"  # **Cleaner look**
     )
 
     return fig
+
+@app.callback(
+    Output("stored-data-plot", "figure"),
+    Input("stored-data-plot", "id")  # Placeholder to trigger update
+)
+def update_stored_data_plot(_):
+    fig = go.Figure()
+
+    # **Line Graph for Stored Data Levels**
+    fig.add_trace(go.Scatter(
+        x=rpo_plan["secondsSinceStart"],
+        y=rpo_plan["storedData"],
+        mode="lines",
+        line=dict(color="blue", width=2),
+        name="Stored Data"
+    ))
+
+    # **Layout Formatting**
+    fig.update_layout(
+        title="Stored Data Levels Over Time",
+        xaxis_title="Time Since Start (Seconds)",
+        yaxis_title="Stored Data (Units)",
+        template="plotly_white",
+        height=600,
+    )
+
+    return fig
+
 
 if __name__ == '__main__':
     app.run_server(debug=True)
