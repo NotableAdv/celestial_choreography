@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import pandas as pd
 
 # Load RPO data
-rpo_df = pd.read_csv("data/RpoPlan.csv")
+rpo_df = pd.read_csv("Data/RpoPlan.csv")
 
 # Extract positions
 chief_x, chief_y, chief_z = rpo_df["positionChiefEciX"], rpo_df["positionChiefEciY"], rpo_df["positionChiefEciZ"]
