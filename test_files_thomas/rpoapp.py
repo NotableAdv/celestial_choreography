@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Dash, dcc, html, Input, Output
+from dash import Dash, dcc, html, Input, Output, dcc, page_registry, page_container
 import re
 
 # Define the directory where CSV files are stored
@@ -11,9 +11,43 @@ DATA_DIR = "Data"
 rpo_plan_path = os.path.join(DATA_DIR, "RpoPlan.csv")
 rpo_plan = pd.read_csv(rpo_plan_path)
 
+# DeltaV CSVs
+# Load the maneuver plan data
+maneuver_plan_path = os.path.join(DATA_DIR, "ManeuverPlan.csv")
+maneuver_plan = pd.read_csv(maneuver_plan_path)
+
+# Ensure numeric columns
+maneuver_plan["secondsSinceStart"] = pd.to_numeric(maneuver_plan["secondsSinceStart"], errors="coerce")
+maneuver_plan["dVMagnitude"] = pd.to_numeric(maneuver_plan["dVMagnitude"], errors="coerce")
+
+# Convert time from seconds since start to UTC (if available)
+if "timeUtcYear" in maneuver_plan.columns:
+    maneuver_plan["time_utc"] = pd.to_datetime(
+        maneuver_plan[["timeUtcYear", "timeUtcMonth", "timeUtcDay", "timeUtcHour", "timeUtcMinute", "timeUtcSecond"]]
+    )
+else:
+    maneuver_plan["time_utc"] = maneuver_plan["secondsSinceStart"]  # Placeholder if no UTC columns exist
+
+# Sort data by time
+maneuver_plan = maneuver_plan.sort_values(by="time_utc")
+
+# Compute cumulative ΔV
+maneuver_plan["cumulative_dV"] = maneuver_plan["dVMagnitude"].cumsum()
+
+
 # Ensure numeric columns
 rpo_plan["secondsSinceStart"] = pd.to_numeric(rpo_plan["secondsSinceStart"], errors="coerce")
 rpo_plan["relativeRange"] = pd.to_numeric(rpo_plan["relativeRange"], errors="coerce")
+
+# Define thresholds for "bad vision" hot zones
+MOON_ANGLE_THRESHOLD = 12 
+EARTH_ANGLE_THRESHOLD = 10
+SUN_ANGLE_THRESHOLD = 40
+
+# Ensure hotzone columns exist
+rpo_plan["HotZone_Moon"] = rpo_plan["sensorAngleToMoon"] < MOON_ANGLE_THRESHOLD
+rpo_plan["HotZone_Earth"] = rpo_plan["sensorAngleToEarth"] < EARTH_ANGLE_THRESHOLD
+rpo_plan["HotZone_Sun"] = rpo_plan["sensorAngleToSun"] < SUN_ANGLE_THRESHOLD
 
 # Extract RPO trajectory
 rpo_time = rpo_plan["secondsSinceStart"]
@@ -23,6 +57,8 @@ rpo_x, rpo_y, rpo_z = (
     rpo_plan["positionDepRelToChiefLvlhZ"]
 )
 rpo_range = rpo_plan["relativeRange"]
+rpo_velocity = pd.to_numeric(rpo_plan["relativeVelocity"], errors="coerce")
+
 
 # **Chief (RSO) static position**
 chief_x, chief_y, chief_z = [0], [0], [0]  # Adjust if there's a specific position
@@ -54,32 +90,77 @@ dropdown_options += [
 ]
 
 # Initialize Dash App
-app = Dash(__name__)
+app = Dash(__name__, suppress_callback_exceptions=True)
 
 app.layout = html.Div([
-    html.H1("RPO Flight Path & Relative Range Analysis"),
-    
-    # Dropdown for maneuver selection
-    dcc.Dropdown(
-        id="maneuver-selector",
-        options=dropdown_options,
-        value="main",
-        clearable=False
-    ),
-    
-    # 3D Flight Path Visualization
-    dcc.Graph(id="flight-path-plot"),
-    
-    # 2D Relative Range Over Time Visualization
-    dcc.Graph(id="relative-range-plot"),
+    dcc.Location(id="url", refresh=False),  # Tracks the page URL
+
+    # Navigation Links
+    html.Div([
+        dcc.Link("Main Page | ", href="/"),
+        dcc.Link("Additional Graphs", href="/graphs"),
+    ], style={"padding": "10px", "fontSize": "20px"}),
+
+    # Content Container (will switch between pages)
+    html.Div(id="page-content")
 ])
+
+def main_page():
+    return html.Div([
+        html.H1("RPO Flight Path & Relative Range Analysis"),
+
+        # Dropdown for maneuver selection
+        dcc.Dropdown(
+            id="maneuver-selector",
+            options=dropdown_options,
+            value="main",
+            clearable=False
+        ),
+
+        html.Div([
+            html.Label("Select Vision Obstruction Highlight"),
+            dcc.Dropdown(
+                id="hotzone-selector",
+                options=[
+                    {"label": "Show None", "value": "none"},
+                    {"label": "Show All", "value": "all"},
+                    {"label": "Highlight Bad Moon Angle", "value": "HotZone_Moon"},
+                    {"label": "Highlight Bad Earth Angle", "value": "HotZone_Earth"},
+                    {"label": "Highlight Bad Sun Angle", "value": "HotZone_Sun"},
+                ],
+                value="none",
+                clearable=False
+            ),
+        ]),
+
+        # 3D Flight Path Visualization
+        dcc.Graph(id="flight-path-plot"),
+
+        # 2D Relative Range Over Time Visualization
+        dcc.Graph(id="relative-range-plot"),
+
+        # 2D Relative Velocity Over Time Visualization
+        dcc.Graph(id="relative-velocity-plot"),
+    ])
+
+def graphs_page():
+    return html.Div([
+        html.H1("Additional Graphs"),
+
+        # Delta-V Over Time Graph
+        dcc.Graph(id="delta-v-plot"),
+    ])
+
+
 
 @app.callback(
     [Output("flight-path-plot", "figure"),
-     Output("relative-range-plot", "figure")],
-    Input("maneuver-selector", "value")
+     Output("relative-range-plot", "figure"),
+     Output("relative-velocity-plot", "figure")],  # Added velocity plot
+    [Input("maneuver-selector", "value"),
+     Input("hotzone-selector", "value")]
 )
-def update_plots(selected_maneuver):
+def update_plots(selected_maneuver, selected_hotzone):
     fig_3d = go.Figure()
     fig_2d = go.Figure()
 
@@ -222,7 +303,7 @@ def update_plots(selected_maneuver):
     ))
 
     # Format 3D plot
-    fig_3d.update_layout(scene=dict(xaxis_title="Relative X (km)", yaxis_title="Relative Y (km)", zaxis_title="Relative Z (km)"))
+    fig_3d.update_layout(scene=dict(xaxis_title="Relative X", yaxis_title="Relative Y", zaxis_title="Relative Z"))
 
     # Dynamically determine y-axis range based on selected maneuver
     if selected_maneuver == "main":
@@ -242,9 +323,101 @@ def update_plots(selected_maneuver):
         xaxis=dict(range=[x_min, x_max], rangeslider=dict(visible=True)),  # Auto-zoom x-axis to relevant time range
     )
 
+    # Overlay vision highlights as red markers
+    if selected_hotzone == "all":
+        # Show all vision obstructions
+        hotzone_data = rpo_plan[(rpo_plan["HotZone_Moon"]) | (rpo_plan["HotZone_Earth"]) | (rpo_plan["HotZone_Sun"])]
+        fig_3d.add_trace(go.Scatter3d(
+            x=hotzone_data["positionDepRelToChiefLvlhX"],
+            y=hotzone_data["positionDepRelToChiefLvlhY"],
+            z=hotzone_data["positionDepRelToChiefLvlhZ"],
+            mode="markers",
+            marker=dict(color="red", size=5),
+            name="All Vision Obstructions"
+        ))
+    elif selected_hotzone != "none":  # Show individual obstructions
+        hotzone_data = rpo_plan[rpo_plan[selected_hotzone]]
+        fig_3d.add_trace(go.Scatter3d(
+            x=hotzone_data["positionDepRelToChiefLvlhX"],
+            y=hotzone_data["positionDepRelToChiefLvlhY"],
+            z=hotzone_data["positionDepRelToChiefLvlhZ"],
+            mode="markers",
+            marker=dict(color="red", size=5),
+            name="Vision Obstruction"
+        ))
 
 
-    return fig_3d, fig_2d
+    fig_velocity = go.Figure()
+
+    # 2D: Relative Velocity Over Time
+    fig_velocity.add_trace(go.Scatter(
+        x=rpo_time, y=rpo_velocity,
+        mode="lines",
+        name="Relative Velocity",
+        line=dict(color="purple", width=2)
+    ))
+
+    fig_velocity.update_layout(
+        xaxis_title="Time (secondsSinceStart)",
+        yaxis_title="Relative Velocity (m/s)",
+        margin=dict(l=0, r=0, b=40, t=40),
+        legend=dict(x=0, y=1),
+        xaxis=dict(range=[rpo_time.min(), rpo_time.max()], rangeslider=dict(visible=True))
+)
+
+
+    return fig_3d, fig_2d, fig_velocity
+
+@app.callback(
+    Output("page-content", "children"),  # Updates the content div
+    Input("url", "pathname")  # Tracks page navigation
+)
+def display_page(pathname):
+    if pathname == "/graphs":
+        return graphs_page()
+    else:
+        return main_page()  # Default to the main page
+
+@app.callback(
+    Output("delta-v-plot", "figure"),
+    Input("delta-v-plot", "id")  # Placeholder input to trigger update
+)
+def update_delta_v_plot(_):
+    fig = go.Figure()
+
+    # **Make Bars More Visible**
+    fig.add_trace(go.Bar(
+        x=maneuver_plan["time_utc"],
+        y=maneuver_plan["dVMagnitude"],
+        name="ΔV per Maneuver",
+        marker_color="black",  # **Stronger color**
+        marker_line_color="black",  # **Outline for contrast**
+        marker_line_width=1.5,  # **Thicker bars**
+        opacity=0.9,  # **Reduce transparency for emphasis**
+    ))
+
+    # **Red Line for Cumulative ΔV**
+    fig.add_trace(go.Scatter(
+        x=maneuver_plan["time_utc"],
+        y=maneuver_plan["cumulative_dV"],
+        mode="lines+markers",
+        name="Cumulative ΔV",
+        line=dict(color="red", width=3),  # **Thicker Line**
+        marker=dict(symbol="circle", size=6, color="red"),
+    ))
+
+    # Layout Formatting
+    fig.update_layout(
+        title="Running Total of Delta-V Over Time",
+        xaxis_title="Time (UTC)",
+        yaxis_title="ΔV (m/s)",
+        legend=dict(x=0, y=1),
+        xaxis=dict(rangeslider=dict(visible=True)),
+        height=600,  # **Increase height for better separation**
+        template="plotly_white"  # **Cleaner look**
+    )
+
+    return fig
 
 if __name__ == '__main__':
     app.run_server(debug=True)
