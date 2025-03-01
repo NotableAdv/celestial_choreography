@@ -13,6 +13,7 @@ rpo_plan = pd.read_csv(rpo_plan_path)
 
 # Ensure numeric columns
 rpo_plan["secondsSinceStart"] = pd.to_numeric(rpo_plan["secondsSinceStart"], errors="coerce")
+rpo_plan["relativeRange"] = pd.to_numeric(rpo_plan["relativeRange"], errors="coerce")
 
 # Extract RPO trajectory
 rpo_time = rpo_plan["secondsSinceStart"]
@@ -21,11 +22,12 @@ rpo_x, rpo_y, rpo_z = (
     rpo_plan["positionDepRelToChiefLvlhY"],
     rpo_plan["positionDepRelToChiefLvlhZ"]
 )
+rpo_range = rpo_plan["relativeRange"]
 
-# Extract Chief (RSO) position (assuming it remains static at (0,0,0))
+# **Chief (RSO) static position**
 chief_x, chief_y, chief_z = [0], [0], [0]  # Adjust if there's a specific position
 
-# Function to extract maneuver number for natural sorting
+# Function to extract maneuver number for sorting
 def extract_number(filename):
     match = re.search(r"(\d+)", filename)
     return int(match.group(0)) if match else float("inf")
@@ -36,80 +38,106 @@ branch_files = sorted(
     key=extract_number
 )
 
-# Create dropdown options dynamically with corrected order
+# Identify flagged branches where relativeRange <= 100m
+flagged_branches = []
+for f in branch_files:
+    branch_path = os.path.join(DATA_DIR, f)
+    branch_df = pd.read_csv(branch_path)
+    if (branch_df["relativeRange"] <= 100).any():
+        flagged_branches.append(f)
+
+# Create dropdown options dynamically
 dropdown_options = [{"label": "Full RPO Plan (No Failure)", "value": "main"}]
 dropdown_options += [
-    {"label": f"Miss Maneuver {extract_number(f)}", "value": f} for f in branch_files
+    {"label": f"⚠ Miss Maneuver {extract_number(f)} (Close Approach!)" if f in flagged_branches else f"Miss Maneuver {extract_number(f)}",
+     "value": f} for f in branch_files
 ]
 
 # Initialize Dash App
 app = Dash(__name__)
 
 app.layout = html.Div([
-    html.H1("RPO 3D Flight Path Visualization"),
+    html.H1("RPO Flight Path & Relative Range Analysis"),
     
-    dcc.Graph(id="flight-path-plot"),
-
-    # Dropdown for maneuver failure selection
+    # Dropdown for maneuver selection
     dcc.Dropdown(
         id="maneuver-selector",
         options=dropdown_options,
         value="main",
         clearable=False
-    )
+    ),
+    
+    # 3D Flight Path Visualization
+    dcc.Graph(id="flight-path-plot"),
+    
+    # 2D Relative Range Over Time Visualization
+    dcc.Graph(id="relative-range-plot"),
 ])
 
 @app.callback(
-    Output("flight-path-plot", "figure"),
+    [Output("flight-path-plot", "figure"),
+     Output("relative-range-plot", "figure")],
     Input("maneuver-selector", "value")
 )
-def update_plot(selected_maneuver):
-    fig = go.Figure()
+def update_plots(selected_maneuver):
+    fig_3d = go.Figure()
+    fig_2d = go.Figure()
 
     if selected_maneuver == "main":
-        # Plot full RPO plan
-        fig.add_trace(go.Scatter3d(
+        # 3D: Full RPO path
+        fig_3d.add_trace(go.Scatter3d(
             x=rpo_x, y=rpo_y, z=rpo_z,
             mode='lines',
             name='Full RPO Plan',
             line=dict(color='blue', width=2)
         ))
+
+        # 2D: Full RPO range plot
+        fig_2d.add_trace(go.Scatter(
+            x=rpo_time, y=rpo_range,
+            mode="lines",
+            name="Full RPO Plan",
+            line=dict(color="blue", width=2)
+        ))
+
     else:
-        # Load the selected maneuver branch
+        # Load maneuver branch
         branch_path = os.path.join(DATA_DIR, selected_maneuver)
         maneuver_branch = pd.read_csv(branch_path)
 
         # Ensure numeric columns
         maneuver_branch["secondsSinceStart"] = pd.to_numeric(maneuver_branch["secondsSinceStart"], errors="coerce")
+        maneuver_branch["relativeRange"] = pd.to_numeric(maneuver_branch["relativeRange"], errors="coerce")
 
-        # Dynamically determine the break-off time based on the first valid timestamp in the maneuver branch
+        # Dynamically determine the break-off time
         break_off_time = maneuver_branch["secondsSinceStart"].min()
-        end_maneuver_time = maneuver_branch["secondsSinceStart"].max()  # Last time in maneuver branch
+        end_maneuver_time = maneuver_branch["secondsSinceStart"].max()
 
-        # Find the nearest match in the RPO plan for break-off
-        matching_rpo_indices = rpo_time[rpo_time <= break_off_time].index
-        if matching_rpo_indices.empty:
+        # Find RPO data until break-off
+        rpo_before_index = rpo_time[rpo_time <= break_off_time].index
+        if rpo_before_index.empty:
             print(f"Warning: No valid break-off point found for {selected_maneuver}. Skipping visualization.")
-            return fig  # Return plot without modifications
+            return fig_3d, fig_2d
+        
+        break_index = rpo_before_index[-1]
 
-        break_index = matching_rpo_indices[-1]  # Use the last index before break-off
+        # 3D: RPO path until failure
+        fig_3d.add_trace(go.Scatter3d(
+            x=rpo_x[:break_index], y=rpo_y[:break_index], z=rpo_z[:break_index],
+            mode="lines",
+            name="RPO Path (Until Failure)",
+            line=dict(color="blue", width=2)
+        ))
 
-        # Extract RPO path **until failure**
-        rpo_x_fail = rpo_x[:break_index]
-        rpo_y_fail = rpo_y[:break_index]
-        rpo_z_fail = rpo_z[:break_index]
-
-        # Extract maneuver branch trajectory
-        maneuver_branch = maneuver_branch[maneuver_branch["secondsSinceStart"] >= break_off_time]
-
-        if maneuver_branch.empty:
-            print(f"Warning: No valid data after time {break_off_time} in {selected_maneuver}.")
-            return fig  # Return RPO-only plot if branch data is missing
-
-        branch_x = maneuver_branch["positionDepRelToChiefLvlhX"]
-        branch_y = maneuver_branch["positionDepRelToChiefLvlhY"]
-        branch_z = maneuver_branch["positionDepRelToChiefLvlhZ"]
-
+        # 3D: Maneuver branch path
+        fig_3d.add_trace(go.Scatter3d(
+            x=maneuver_branch["positionDepRelToChiefLvlhX"],
+            y=maneuver_branch["positionDepRelToChiefLvlhY"],
+            z=maneuver_branch["positionDepRelToChiefLvlhZ"],
+            mode="lines",
+            name=f"Path after {selected_maneuver}",
+            line=dict(color="red", width=3)
+        ))
         # Find actual break-off coordinates
         break_x, break_y, break_z = rpo_x.iloc[break_index], rpo_y.iloc[break_index], rpo_z.iloc[break_index]
 
@@ -119,28 +147,9 @@ def update_plot(selected_maneuver):
             expected_rpo_x = rpo_x[expected_rpo_indices]
             expected_rpo_y = rpo_y[expected_rpo_indices]
             expected_rpo_z = rpo_z[expected_rpo_indices]
-        else:
-            expected_rpo_x, expected_rpo_y, expected_rpo_z = [], [], []
 
-        # Plot the RPO path until failure
-        fig.add_trace(go.Scatter3d(
-            x=rpo_x_fail, y=rpo_y_fail, z=rpo_z_fail,
-            mode="lines",
-            name="RPO Path (Until Failure)",
-            line=dict(color="blue", width=2, dash="solid")
-        ))
-
-        # Plot the maneuver branch path
-        fig.add_trace(go.Scatter3d(
-            x=branch_x, y=branch_y, z=branch_z,
-            mode="lines",
-            name=f"Path after {selected_maneuver}",
-            line=dict(color="red", width=3)
-        ))
-
-        # Plot the expected RPO continuation in **dashed green**
-        if len(expected_rpo_x) > 0:
-            fig.add_trace(go.Scatter3d(
+            # Plot the expected RPO continuation (dashed green)
+            fig_3d.add_trace(go.Scatter3d(
                 x=expected_rpo_x, y=expected_rpo_y, z=expected_rpo_z,
                 mode="lines",
                 name="Expected RPO Continuation",
@@ -148,32 +157,71 @@ def update_plot(selected_maneuver):
             ))
 
         # Mark the break-off point dynamically
-        fig.add_trace(go.Scatter3d(
+        fig_3d.add_trace(go.Scatter3d(
             x=[break_x], y=[break_y], z=[break_z],
             mode="markers",
             marker=dict(color="green", size=4, symbol="diamond"),
             name="Break-off Point"
         ))
 
-    # **Add static Chief (RSO) at the center**
-    fig.add_trace(go.Scatter3d(
+        # 2D: RPO range until break-off
+        fig_2d.add_trace(go.Scatter(
+            x=rpo_time[:break_index], y=rpo_range[:break_index],
+            mode="lines",
+            name="RPO Plan (Until Failure)",
+            line=dict(color="blue", width=2)
+        ))
+
+        # 2D: Maneuver branch range
+        fig_2d.add_trace(go.Scatter(
+            x=maneuver_branch["secondsSinceStart"], y=maneuver_branch["relativeRange"],
+            mode="lines",
+            name=f"Range after {selected_maneuver}",
+            line=dict(color="red", width=2)
+        ))
+
+        # Expected RPO continuation (dashed green)
+        expected_rpo_indices = rpo_time[(rpo_time >= break_off_time) & (rpo_time <= end_maneuver_time)].index
+        if not expected_rpo_indices.empty:
+            fig_2d.add_trace(go.Scatter(
+                x=rpo_time[expected_rpo_indices], y=rpo_range[expected_rpo_indices],
+                mode="lines",
+                name="Expected RPO Continuation",
+                line=dict(color="green", width=2, dash="dash")
+            ))
+
+    # **3D: Chief (RSO) as a static marker**
+    fig_3d.add_trace(go.Scatter3d(
         x=chief_x, y=chief_y, z=chief_z,
         mode="markers",
         marker=dict(color="black", size=6, symbol="circle"),
         name="Chief (RSO)"
     ))
 
-    fig.update_layout(
-        scene=dict(
-            xaxis_title="Relative X (km)",
-            yaxis_title="Relative Y (km)",
-            zaxis_title="Relative Z (km)"
-        ),
-        margin=dict(l=0, r=0, b=0, t=40),
-        legend=dict(x=0, y=1)
+    # Format 3D plot
+    fig_3d.update_layout(scene=dict(xaxis_title="Relative X (km)", yaxis_title="Relative Y (km)", zaxis_title="Relative Z (km)"))
+
+    # Dynamically determine y-axis range based on selected maneuver
+    if selected_maneuver == "main":
+        y_min, y_max = rpo_range.min(), rpo_range.max()
+        x_min, x_max = rpo_time.min(), rpo_time.max()  # Show full RPO timeline
+    else:
+        y_min, y_max = maneuver_branch["relativeRange"].min(), maneuver_branch["relativeRange"].max()
+        x_min, x_max = maneuver_branch["secondsSinceStart"].min(), maneuver_branch["secondsSinceStart"].max()
+
+    # Format 2D plot with dynamic y-axis scaling and zoomed x-axis
+    fig_2d.update_layout(
+        xaxis_title="Time (secondsSinceStart)",
+        yaxis_title="Relative Range (m)",
+        margin=dict(l=0, r=0, b=40, t=40),
+        legend=dict(x=0, y=1),
+        yaxis=dict(range=[y_min * 0.95, y_max * 1.05]),  # Adds a small buffer so points aren't at the extreme edges
+        xaxis=dict(range=[x_min, x_max], rangeslider=dict(visible=True)),  # Auto-zoom x-axis to relevant time range
     )
 
-    return fig
+
+
+    return fig_3d, fig_2d
 
 if __name__ == '__main__':
     app.run_server(debug=True)
