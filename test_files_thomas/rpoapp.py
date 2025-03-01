@@ -73,8 +73,9 @@ def update_plot(selected_maneuver):
 
         # Dynamically determine the break-off time based on the first valid timestamp in the maneuver branch
         break_off_time = maneuver_branch["secondsSinceStart"].min()
+        end_maneuver_time = maneuver_branch["secondsSinceStart"].max()  # Last time in maneuver branch
 
-        # Find the nearest match in the RPO plan
+        # Find the nearest match in the RPO plan for break-off
         matching_rpo_indices = rpo_time[rpo_time <= break_off_time].index
         if matching_rpo_indices.empty:
             print(f"Warning: No valid break-off point found for {selected_maneuver}. Skipping visualization.")
@@ -87,14 +88,13 @@ def update_plot(selected_maneuver):
         rpo_y_fail = rpo_y[:break_index]
         rpo_z_fail = rpo_z[:break_index]
 
-        # Filter the maneuver branch to only include times **after** the break-off point
+        # Extract maneuver branch trajectory
         maneuver_branch = maneuver_branch[maneuver_branch["secondsSinceStart"] >= break_off_time]
 
         if maneuver_branch.empty:
             print(f"Warning: No valid data after time {break_off_time} in {selected_maneuver}.")
             return fig  # Return RPO-only plot if branch data is missing
 
-        # Extract maneuver trajectory
         branch_x = maneuver_branch["positionDepRelToChiefLvlhX"]
         branch_y = maneuver_branch["positionDepRelToChiefLvlhY"]
         branch_z = maneuver_branch["positionDepRelToChiefLvlhZ"]
@@ -102,12 +102,21 @@ def update_plot(selected_maneuver):
         # Find actual break-off coordinates
         break_x, break_y, break_z = rpo_x.iloc[break_index], rpo_y.iloc[break_index], rpo_z.iloc[break_index]
 
+        # Extract RPO trajectory **after break-off** for dashed continuation path
+        expected_rpo_indices = rpo_time[(rpo_time >= break_off_time) & (rpo_time <= end_maneuver_time)].index
+        if not expected_rpo_indices.empty:
+            expected_rpo_x = rpo_x[expected_rpo_indices]
+            expected_rpo_y = rpo_y[expected_rpo_indices]
+            expected_rpo_z = rpo_z[expected_rpo_indices]
+        else:
+            expected_rpo_x, expected_rpo_y, expected_rpo_z = [], [], []
+
         # Plot the RPO path until failure
         fig.add_trace(go.Scatter3d(
             x=rpo_x_fail, y=rpo_y_fail, z=rpo_z_fail,
             mode="lines",
             name="RPO Path (Until Failure)",
-            line=dict(color='blue', width=2)
+            line=dict(color="blue", width=2, dash="solid")
         ))
 
         # Plot the maneuver branch path
@@ -117,6 +126,15 @@ def update_plot(selected_maneuver):
             name=f"Path after {selected_maneuver}",
             line=dict(color="red", width=3)
         ))
+
+        # Plot the expected RPO continuation in **dashed green**
+        if not expected_rpo_x.empty:
+            fig.add_trace(go.Scatter3d(
+                x=expected_rpo_x, y=expected_rpo_y, z=expected_rpo_z,
+                mode="lines",
+                name="Expected RPO Continuation",
+                line=dict(color="green", width=2, dash="dash")
+            ))
 
         # Mark the break-off point dynamically
         fig.add_trace(go.Scatter3d(
